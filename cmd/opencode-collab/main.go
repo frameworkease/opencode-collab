@@ -26,7 +26,12 @@ func main() {
 	defer st.Close()
 
 	sessions := session.New(cfg.CookieSecret)
-	px, err := proxy.New(cfg.Upstream, st, sessions)
+	px, err := proxy.NewWithOptions(proxy.Options{
+		Upstream:     cfg.Upstream,
+		UpstreamPair: cfg.UpstreamPair,
+		Store:        st,
+		Sessions:     sessions,
+	})
 	if err != nil {
 		log.Fatalf("proxy: %v", err)
 	}

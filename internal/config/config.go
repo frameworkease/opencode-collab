@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Listen       string
 	Upstream     string
+	UpstreamPair string // optional OpenCode pair service (e.g. http://opencode:49375)
 	Database     string
 	CookieSecret string
 	BindToken    string
@@ -18,6 +19,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Listen:       envOr("OPENCODE_COLLAB_LISTEN", ":4095"),
 		Upstream:     strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_UPSTREAM")),
+		UpstreamPair: strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_UPSTREAM_PAIR")),
 		Database:     envOr("OPENCODE_COLLAB_DATABASE", "./user.db"),
 		CookieSecret: strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_COOKIE_SECRET")),
 		BindToken:    strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_BIND_TOKEN")),

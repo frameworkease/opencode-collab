@@ -22,14 +22,26 @@ type Proxy struct {
 	Store    *store.Store
 	Sessions *session.Manager
 	RP       *httputil.ReverseProxy
+	PairRP   *httputil.ReverseProxy // optional; OpenCode pair service
+}
+
+type Options struct {
+	Upstream     string
+	UpstreamPair string
+	Store        *store.Store
+	Sessions     *session.Manager
 }
 
 func New(upstream string, st *store.Store, sessions *session.Manager) (*Proxy, error) {
-	u, err := url.Parse(upstream)
+	return NewWithOptions(Options{Upstream: upstream, Store: st, Sessions: sessions})
+}
+
+func NewWithOptions(opt Options) (*Proxy, error) {
+	u, err := url.Parse(opt.Upstream)
 	if err != nil {
 		return nil, err
 	}
-	p := &Proxy{Upstream: u, Store: st, Sessions: sessions}
+	p := &Proxy{Upstream: u, Store: opt.Store, Sessions: opt.Sessions}
 	rp := httputil.NewSingleHostReverseProxy(u)
 	rp.FlushInterval = -1
 	origDirector := rp.Director
@@ -50,6 +62,29 @@ func New(upstream string, st *store.Store, sessions *session.Manager) (*Proxy, e
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 	}
 	p.RP = rp
+
+	if pair := strings.TrimSpace(opt.UpstreamPair); pair != "" {
+		pu, err := url.Parse(pair)
+		if err != nil {
+			return nil, err
+		}
+		prp := httputil.NewSingleHostReverseProxy(pu)
+		prp.FlushInterval = -1
+		origPair := prp.Director
+		prp.Director = func(req *http.Request) {
+			clientHost := req.Host
+			origPair(req)
+			if clientHost != "" {
+				req.Host = clientHost
+			}
+			req.Header.Del("Accept-Encoding")
+		}
+		prp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Printf("pair upstream error: %v", err)
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+		}
+		p.PairRP = prp
+	}
 	return p, nil
 }
 
@@ -113,54 +148,38 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	code = strings.TrimSpace(code)
 
-	pair, pairErr := p.Store.GetPair(code)
-	hasPair := pairErr == nil
-
-	// Capture upstream response to optionally add sidecar cookie.
-	rec := &captureResponse{header: make(http.Header)}
-	p.RP.ServeHTTP(rec, r)
-
-	if hasPair && rec.status >= 200 && rec.status < 400 {
+	pair, err := p.Store.GetPair(code)
+	if err == nil {
+		// Collab bind codes are independent of OpenCode pairing.
 		sid, exp, err := p.Sessions.Issue()
-		if err == nil {
-			if err := p.Store.PutSession(sid, pair.UserID, exp); err == nil {
-				_ = p.Store.DeletePair(code)
-				http.SetCookie(w, &http.Cookie{
-					Name:     session.CookieName,
-					Value:    sid,
-					Path:     "/",
-					HttpOnly: true,
-					SameSite: http.SameSiteLaxMode,
-					MaxAge:   int(time.Until(exp).Seconds()),
-				})
-			}
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
 		}
-	}
-
-	for k, vv := range rec.header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
+		if err := p.Store.PutSession(sid, pair.UserID, exp); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
 		}
+		_ = p.Store.DeletePair(code)
+		http.SetCookie(w, &http.Cookie{
+			Name:     session.CookieName,
+			Value:    sid,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   int(time.Until(exp).Seconds()),
+		})
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
 	}
-	if rec.status == 0 {
-		rec.status = http.StatusOK
+
+	// Native OpenCode pair codes live on the pair service, not the main serve port.
+	if p.PairRP != nil {
+		p.PairRP.ServeHTTP(w, r)
+		return
 	}
-	w.WriteHeader(rec.status)
-	_, _ = w.Write(rec.body)
+	p.RP.ServeHTTP(w, r)
 }
-
-type captureResponse struct {
-	header http.Header
-	status int
-	body   []byte
-}
-
-func (c *captureResponse) Header() http.Header { return c.header }
-func (c *captureResponse) Write(b []byte) (int, error) {
-	c.body = append(c.body, b...)
-	return len(b), nil
-}
-func (c *captureResponse) WriteHeader(status int) { c.status = status }
 
 func (p *Proxy) modifyResponse(res *http.Response) error {
 	if res == nil || res.Request == nil {
