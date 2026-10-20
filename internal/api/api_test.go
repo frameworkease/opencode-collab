@@ -30,12 +30,23 @@ func TestBindAuthAndProfile(t *testing.T) {
 		t.Fatalf("want 401, got %d", rec.Code)
 	}
 
+	body = []byte(`{"code":"abc","publicBase":"http://192.168.31.60:4095","user":{"id":"u1","username":"alice","nickname":"Alice"}}`)
 	req = httptest.NewRequest(http.MethodPost, "/v1/bind", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer secret")
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d %s", rec.Code, rec.Body.String())
+	}
+	var bindResp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &bindResp); err != nil {
+		t.Fatal(err)
+	}
+	if bindResp["connectPath"] != "/auth/connect/abc" {
+		t.Fatalf("connectPath=%v", bindResp["connectPath"])
+	}
+	if bindResp["connectUrl"] != "http://192.168.31.60:4095/auth/connect/abc" {
+		t.Fatalf("connectUrl=%v", bindResp["connectUrl"])
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/v1/profile/u1", nil)

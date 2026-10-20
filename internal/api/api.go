@@ -42,10 +42,14 @@ func (h *Handler) requireBindToken(next http.Handler) http.Handler {
 	})
 }
 
+// bindRequest attaches a collab user to an existing OpenCode pair code.
+// Code must come from `opencode pair` (not a random string): the same code is
+// redeemed by OpenCode on GET /auth/connect/{code}, then collab sets its cookie.
 type bindRequest struct {
-	Code      string `json:"code"`
-	ExpiresIn int    `json:"expiresIn"`
-	User      struct {
+	Code       string `json:"code"`                 // OpenCode pair code
+	PublicBase string `json:"publicBase,omitempty"` // e.g. http://192.168.31.60:4095
+	ExpiresIn  int    `json:"expiresIn"`
+	User       struct {
 		ID         string `json:"id"`
 		Username   string `json:"username"`
 		Nickname   string `json:"nickname"`
@@ -62,7 +66,7 @@ func (h *Handler) bind(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimSpace(req.Code)
 	uid := strings.TrimSpace(req.User.ID)
 	if code == "" || uid == "" {
-		http.Error(w, "code and user.id required", http.StatusBadRequest)
+		http.Error(w, "code (from opencode pair) and user.id required", http.StatusBadRequest)
 		return
 	}
 	avatar, mime, err := store.DecodeAvatarData(req.User.AvatarData)
@@ -89,18 +93,24 @@ func (h *Handler) bind(w http.ResponseWriter, r *http.Request) {
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	if err := h.Store.PutPair(code, uid, ttl); err != nil {
+	if err := h.Store.PutBinding(code, uid, ttl); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true,
+	connectPath := "/auth/connect/" + code
+	out := map[string]any{
+		"ok":          true,
+		"connectPath": connectPath,
 		"user": map[string]string{
 			"id":       u.ID,
 			"username": u.Username,
 			"nickname": u.Nickname,
 		},
-	})
+	}
+	if base := strings.TrimRight(strings.TrimSpace(req.PublicBase), "/"); base != "" {
+		out["connectUrl"] = base + connectPath
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) profile(w http.ResponseWriter, r *http.Request) {

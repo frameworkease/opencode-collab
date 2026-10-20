@@ -147,6 +147,11 @@ func (p *Proxy) actorFromRequest(r *http.Request) *inject.Actor {
 	}
 }
 
+// handleConnect redeems GET /auth/connect/{code}.
+//
+// Always goes through the OpenCode pair service (OPENCODE_COLLAB_UPSTREAM_PAIR).
+// If collab has a binding for the same code and OpenCode accepts it, also set
+// opencode_collab_sid so later prompts get metadata.sender.
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimPrefix(r.URL.Path, "/auth/connect/")
 	code = strings.Trim(code, "/")
@@ -155,38 +160,57 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	code = strings.TrimSpace(code)
 
-	pair, err := p.Store.GetPair(code)
-	if err == nil {
-		// Collab bind codes are independent of OpenCode pairing.
-		sid, exp, err := p.Sessions.Issue()
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if err := p.Store.PutSession(sid, pair.UserID, exp); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		_ = p.Store.DeletePair(code)
-		http.SetCookie(w, &http.Cookie{
-			Name:     session.CookieName,
-			Value:    sid,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   int(time.Until(exp).Seconds()),
-		})
-		http.Redirect(w, r, "/", http.StatusFound)
+	if p.PairRP == nil {
+		http.Error(w, "OPENCODE_COLLAB_UPSTREAM_PAIR is required for /auth/connect", http.StatusBadGateway)
 		return
 	}
 
-	// Native OpenCode pair codes live on the pair service, not the main serve port.
-	if p.PairRP != nil {
-		p.PairRP.ServeHTTP(w, r)
-		return
+	binding, bindingErr := p.Store.GetBinding(code)
+
+	rec := &captureResponse{header: make(http.Header)}
+	p.PairRP.ServeHTTP(rec, r)
+
+	if bindingErr == nil && rec.status >= 200 && rec.status < 400 {
+		sid, exp, err := p.Sessions.Issue()
+		if err == nil {
+			if err := p.Store.PutSession(sid, binding.UserID, exp); err == nil {
+				_ = p.Store.DeleteBinding(code)
+				http.SetCookie(w, &http.Cookie{
+					Name:     session.CookieName,
+					Value:    sid,
+					Path:     "/",
+					HttpOnly: true,
+					SameSite: http.SameSiteLaxMode,
+					MaxAge:   int(time.Until(exp).Seconds()),
+				})
+			}
+		}
 	}
-	p.RP.ServeHTTP(w, r)
+
+	for k, vv := range rec.header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+	if rec.status == 0 {
+		rec.status = http.StatusOK
+	}
+	w.WriteHeader(rec.status)
+	_, _ = w.Write(rec.body)
 }
+
+type captureResponse struct {
+	header http.Header
+	status int
+	body   []byte
+}
+
+func (c *captureResponse) Header() http.Header { return c.header }
+func (c *captureResponse) Write(b []byte) (int, error) {
+	c.body = append(c.body, b...)
+	return len(b), nil
+}
+func (c *captureResponse) WriteHeader(status int) { c.status = status }
 
 func (p *Proxy) modifyResponse(res *http.Response) error {
 	if res == nil || res.Request == nil {

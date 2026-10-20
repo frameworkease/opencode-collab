@@ -27,12 +27,17 @@ type User struct {
 	CreatedAt  time.Time
 }
 
+// Pair is a binding of an OpenCode pair code → collab user (table name: pairs).
+// Prefer Binding / PutBinding in new call sites.
 type Pair struct {
 	Code      string
 	UserID    string
 	ExpiresAt time.Time
 	CreatedAt time.Time
 }
+
+// Binding is an alias for Pair (OpenCode pair code bound to a collab user).
+type Binding = Pair
 
 type Session struct {
 	SID       string
@@ -136,6 +141,7 @@ FROM users WHERE id=?`, id).Scan(
 	return u, nil
 }
 
+// PutPair stores a binding: code must be a real OpenCode pair code from `opencode pair`.
 func (s *Store) PutPair(code, userID string, expiresIn time.Duration) error {
 	code = strings.TrimSpace(code)
 	userID = strings.TrimSpace(userID)
@@ -181,6 +187,19 @@ SELECT code, user_id, expires_at, created_at FROM pairs WHERE code=?`, code).
 func (s *Store) DeletePair(code string) error {
 	_, err := s.db.Exec(`DELETE FROM pairs WHERE code=?`, strings.TrimSpace(code))
 	return err
+}
+
+// PutBinding / GetBinding / DeleteBinding are clearer aliases for the OpenCode-code → user map.
+func (s *Store) PutBinding(code, userID string, expiresIn time.Duration) error {
+	return s.PutPair(code, userID, expiresIn)
+}
+
+func (s *Store) GetBinding(code string) (Binding, error) {
+	return s.GetPair(code)
+}
+
+func (s *Store) DeleteBinding(code string) error {
+	return s.DeletePair(code)
 }
 
 func (s *Store) PutSession(sid, userID string, expiresAt time.Time) error {
