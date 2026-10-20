@@ -1,0 +1,22 @@
+# Build
+/bin/
+/dist/
+*.exe
+*.test
+coverage.out
+
+# Runtime DB (local go run)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Local smoke / scratch
+/tmp/
+
+# Secrets
+.env
+.env.*
+
+# OS
+.DS_Store
