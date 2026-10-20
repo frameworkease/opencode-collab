@@ -18,18 +18,20 @@ import (
 )
 
 type Proxy struct {
-	Upstream *url.URL
-	Store    *store.Store
-	Sessions *session.Manager
-	RP       *httputil.ReverseProxy
-	PairRP   *httputil.ReverseProxy // optional; OpenCode pair service
+	Upstream      *url.URL
+	UpstreamBasic string
+	Store         *store.Store
+	Sessions      *session.Manager
+	RP            *httputil.ReverseProxy
+	PairRP        *httputil.ReverseProxy // optional; OpenCode pair service
 }
 
 type Options struct {
-	Upstream     string
-	UpstreamPair string
-	Store        *store.Store
-	Sessions     *session.Manager
+	Upstream      string
+	UpstreamPair  string
+	UpstreamBasic string
+	Store         *store.Store
+	Sessions      *session.Manager
 }
 
 func New(upstream string, st *store.Store, sessions *session.Manager) (*Proxy, error) {
@@ -41,7 +43,7 @@ func NewWithOptions(opt Options) (*Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Proxy{Upstream: u, Store: opt.Store, Sessions: opt.Sessions}
+	p := &Proxy{Upstream: u, UpstreamBasic: strings.TrimSpace(opt.UpstreamBasic), Store: opt.Store, Sessions: opt.Sessions}
 	rp := httputil.NewSingleHostReverseProxy(u)
 	rp.FlushInterval = -1
 	origDirector := rp.Director
@@ -55,6 +57,11 @@ func NewWithOptions(opt Options) (*Proxy, error) {
 			req.Host = clientHost
 		}
 		req.Header.Del("Accept-Encoding") // simplify HTML inject; upstream may still gzip
+		if p.UpstreamBasic != "" {
+			if user, pass, ok := strings.Cut(p.UpstreamBasic, ":"); ok {
+				req.SetBasicAuth(user, pass)
+			}
+		}
 	}
 	rp.ModifyResponse = p.modifyResponse
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {

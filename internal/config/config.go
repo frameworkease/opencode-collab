@@ -7,22 +7,24 @@ import (
 )
 
 type Config struct {
-	Listen       string
-	Upstream     string
-	UpstreamPair string // optional OpenCode pair service (e.g. http://opencode:49375)
-	Database     string
-	CookieSecret string
-	BindToken    string
+	Listen        string
+	Upstream      string
+	UpstreamPair  string // optional OpenCode pair service (e.g. http://opencode:49375)
+	UpstreamBasic string // optional "user:pass" for smoke / locked-down upstreams
+	Database      string
+	CookieSecret  string
+	BindToken     string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Listen:       envOr("OPENCODE_COLLAB_LISTEN", ":4095"),
-		Upstream:     strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_UPSTREAM")),
-		UpstreamPair: strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_UPSTREAM_PAIR")),
-		Database:     envOr("OPENCODE_COLLAB_DATABASE", "./user.db"),
-		CookieSecret: strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_COOKIE_SECRET")),
-		BindToken:    strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_BIND_TOKEN")),
+		Listen:        envOr("OPENCODE_COLLAB_LISTEN", ":4095"),
+		Upstream:      strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_UPSTREAM")),
+		UpstreamPair:  strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_UPSTREAM_PAIR")),
+		UpstreamBasic: strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_UPSTREAM_BASIC")),
+		Database:      envOr("OPENCODE_COLLAB_DATABASE", "./user.db"),
+		CookieSecret:  strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_COOKIE_SECRET")),
+		BindToken:     strings.TrimSpace(os.Getenv("OPENCODE_COLLAB_BIND_TOKEN")),
 	}
 	if cfg.Listen != "" && !strings.Contains(cfg.Listen, ":") {
 		cfg.Listen = ":" + cfg.Listen

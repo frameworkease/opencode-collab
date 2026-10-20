@@ -27,10 +27,11 @@ func main() {
 
 	sessions := session.New(cfg.CookieSecret)
 	px, err := proxy.NewWithOptions(proxy.Options{
-		Upstream:     cfg.Upstream,
-		UpstreamPair: cfg.UpstreamPair,
-		Store:        st,
-		Sessions:     sessions,
+		Upstream:      cfg.Upstream,
+		UpstreamPair:  cfg.UpstreamPair,
+		UpstreamBasic: cfg.UpstreamBasic,
+		Store:         st,
+		Sessions:      sessions,
 	})
 	if err != nil {
 		log.Fatalf("proxy: %v", err)
